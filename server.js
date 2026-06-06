@@ -18,7 +18,7 @@ const CFG = {
   GUILD_ID:      process.env.GUILD_ID              || '',
   BOT_TOKEN:     process.env.DISCORD_TOKEN         || '',
   // ID du rôle "Gendarmerie Nationale" sur le serveur Discord
-  ROLE_GEND_ID:  '1508154312595869726',
+  ROLE_GEND_ID:  '1508283902672896055',
 };
 
 // ─── BASE DE DONNÉES ─────────────────────────────────────────────────────────
