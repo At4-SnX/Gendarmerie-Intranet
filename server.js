@@ -1,14 +1,14 @@
 'use strict';
- 
+
 const express  = require('express');
 const session  = require('express-session');
 const fetch    = require('node-fetch');
 const Database = require('better-sqlite3');
 const path     = require('path');
- 
+
 const app  = express();
 const PORT = process.env.PORT || 3000;
- 
+
 // ═══════════════════════════════════════════════════════════════════
 //  CONFIGURATION
 // ═══════════════════════════════════════════════════════════════════
@@ -20,16 +20,16 @@ const CFG = {
   GUILD_ID:       process.env.GUILD_ID              || '',
   BOT_TOKEN:      process.env.DISCORD_TOKEN         || '',
 };
- 
+
 // ═══════════════════════════════════════════════════════════════════
 //  RÔLES & GRADES
 // ═══════════════════════════════════════════════════════════════════
- 
+
 // Rôle d'accès général
 const ROLE_GEND_ID       = '1508283902672896055'; // Gendarmerie Nationale
 const ROLE_PREFECTURE_ID = '1513006896389423275'; // Préfecture
 const ROLE_IGGN_ID       = '1508184761380638820'; // IGGN
- 
+
 // Catégories de grades avec leurs permissions
 // ordre = priorité décroissante (premier trouvé = grade le plus haut)
 const GRADES_DEF = [
@@ -73,9 +73,9 @@ const GRADES_DEF = [
   // ── Représentant ──────────────────────────────────────
   { id:'1512953207238955191', sigle:'RS',  nom:'Représentant Serveur',  rang:'REP',  cat:'representant'},
 ];
- 
+
 const GRADES_MAP = Object.fromEntries(GRADES_DEF.map(g => [g.id, g]));
- 
+
 // ── Règles de permissions ──────────────────────────────────────────
 // Catégories GENDARMERIE (rôle GEND requis)
 const CAT_GEND     = ['off_sup','off_sub','sof_sup','sof_sub','rang','reserve'];
@@ -91,7 +91,7 @@ const CAT_RAPPORT  = ['off_sup','off_sub','sof_sup','sof_sub'];
 const CAT_ORDRES   = ['off_sup','off_sub'];
 // Espace GA
 const IDS_GA       = ['1508161154692677803','1508161155263365212'];
- 
+
 function getGrade(roles) {
   for (const g of GRADES_DEF) {
     if (roles.includes(g.id)) return g;
@@ -107,7 +107,7 @@ function canMandat(roles)  { return hasCat(roles, CAT_MANDAT); }
 function canCasier(roles)  { return hasCat(roles, CAT_CASIER); }
 function canRapport(roles) { return hasCat(roles, CAT_RAPPORT); }
 function canOrdres(roles)  { return hasCat(roles, CAT_ORDRES); }
- 
+
 // ═══════════════════════════════════════════════════════════════════
 //  BASE DE DONNÉES
 // ═══════════════════════════════════════════════════════════════════
@@ -191,36 +191,36 @@ db.exec(`
     created_at  TEXT DEFAULT (datetime('now'))
   );
 `);
- 
+
 const Q = {
   listCasiers:    db.prepare(`SELECT * FROM casiers ORDER BY created_at DESC LIMIT 50`),
   getCasier:      db.prepare(`SELECT * FROM casiers WHERE id=?`),
   searchCasier:   db.prepare(`SELECT * FROM casiers WHERE nom_prenom LIKE ? ORDER BY created_at DESC`),
   insertCasier:   db.prepare(`INSERT INTO casiers (nom_prenom,age_rp,faits,type_peine,amende,amende_payee,duree_gav,duree_prison,photo_url,created_by) VALUES (?,?,?,?,?,?,?,?,?,?)`),
   deleteCasier:   db.prepare(`DELETE FROM casiers WHERE id=?`),
- 
+
   listFS:         db.prepare(`SELECT * FROM fichiers_s WHERE actif=1 ORDER BY niveau ASC,created_at DESC`),
   insertFS:       db.prepare(`INSERT INTO fichiers_s (nom_prenom,age_rp,motif,niveau,description,photo_url,created_by) VALUES (?,?,?,?,?,?,?)`),
   closeFS:        db.prepare(`UPDATE fichiers_s SET actif=0 WHERE id=?`),
- 
+
   listMandats:    db.prepare(`SELECT * FROM mandats ORDER BY created_at DESC LIMIT 60`),
   insertMandat:   db.prepare(`INSERT INTO mandats (type_mandat,cible,motif,details,emis_par,grade_emis) VALUES (?,?,?,?,?,?)`),
   cloturerMandat: db.prepare(`UPDATE mandats SET statut='clôturé' WHERE id=?`),
- 
+
   listRapports:   db.prepare(`SELECT * FROM rapports_patrouille ORDER BY created_at DESC LIMIT 40`),
   insertRapport:  db.prepare(`INSERT INTO rapports_patrouille (titre,zone,contenu,incidents,agents,created_by,grade_by) VALUES (?,?,?,?,?,?,?)`),
- 
+
   listGA:         db.prepare(`SELECT * FROM espace_ga ORDER BY created_at DESC LIMIT 50`),
   insertGA:       db.prepare(`INSERT INTO espace_ga (type_msg,objet,contenu,created_by) VALUES (?,?,?,?)`),
- 
+
   listIGGN:       db.prepare(`SELECT * FROM iggn_dossiers ORDER BY created_at DESC LIMIT 40`),
   insertIGGN:     db.prepare(`INSERT INTO iggn_dossiers (type_saisine,cible,grade_cible,faits,details,created_by) VALUES (?,?,?,?,?,?)`),
   cloturerIGGN:   db.prepare(`UPDATE iggn_dossiers SET statut='clôturé' WHERE id=?`),
- 
+
   listOrdres:     db.prepare(`SELECT * FROM ordres_service ORDER BY created_at DESC LIMIT 20`),
   insertOrdre:    db.prepare(`INSERT INTO ordres_service (titre,contenu,priorite,created_by,grade_by) VALUES (?,?,?,?,?)`),
 };
- 
+
 // ═══════════════════════════════════════════════════════════════════
 //  MIDDLEWARE
 // ═══════════════════════════════════════════════════════════════════
@@ -234,7 +234,7 @@ app.use(session({
   cookie: { maxAge: 1000 * 60 * 60 * 8 },
 }));
 app.use((req, res, next) => { res.locals.user = req.session.user || null; next(); });
- 
+
 // ─── GUARD ───────────────────────────────────────────────────────
 async function requireAuth(req, res, next) {
   if (!req.session.user) return res.redirect('/');
@@ -246,13 +246,13 @@ async function requireAuth(req, res, next) {
     if (!r.ok) { req.session.destroy(); return res.redirect('/?err=guild'); }
     const member = await r.json();
     const roles  = member.roles || [];
- 
+
     const hasGend   = roles.includes(ROLE_GEND_ID);
     const hasPref   = roles.includes(ROLE_PREFECTURE_ID);
     const hasIGGN   = roles.includes(ROLE_IGGN_ID);
- 
+
     if (!hasGend && !hasPref && !hasIGGN) return res.redirect('/acces-refuse');
- 
+
     const grade = getGrade(roles);
     req.session.user.nick        = member.nick || member.user?.global_name || req.session.user.username;
     req.session.user.roles       = roles;
@@ -271,7 +271,7 @@ async function requireAuth(req, res, next) {
     res.redirect('/?err=check');
   }
 }
- 
+
 function guardPerm(permKey) {
   return (req, res, next) => {
     if (!req.session.user) return res.redirect('/');
@@ -279,7 +279,7 @@ function guardPerm(permKey) {
     next();
   };
 }
- 
+
 // ═══════════════════════════════════════════════════════════════════
 //  UTILITAIRES
 // ═══════════════════════════════════════════════════════════════════
@@ -306,7 +306,7 @@ function niveauMeta(n) {
 function prioMeta(p) {
   return { basse:{lbl:'Basse',cls:'p-low'}, normale:{lbl:'Normale',cls:'p-nor'}, haute:{lbl:'Haute',cls:'p-hi'}, urgente:{lbl:'Urgente',cls:'p-urg'} }[p] || {lbl:p,cls:'p-nor'};
 }
- 
+
 // ═══════════════════════════════════════════════════════════════════
 //  LAYOUT
 // ═══════════════════════════════════════════════════════════════════
@@ -314,7 +314,7 @@ function layout(title, body, u) {
   const grade = u?.grade;
   const nick  = u?.nick || u?.username || '—';
   const av    = u ? `https://cdn.discordapp.com/avatars/${u.id}/${u.avatar}.png?size=64` : '';
- 
+
   const navGend = u?.hasGend ? `
       <div class="nav-section">Gendarmerie</div>
       <a href="/casiers"        class="nav-link">Casiers judiciaires</a>
@@ -323,17 +323,17 @@ function layout(title, body, u) {
       <a href="/ordres-service" class="nav-link">Ordres de service</a>
       ${u?.isGA ? `<a href="/espace-ga" class="nav-link">Espace G.A.</a>` : ''}
   ` : '';
- 
+
   const navJudic = `
       <div class="nav-section">Justice</div>
       <a href="/mandats" class="nav-link">Mandats</a>
   `;
- 
+
   const navIGGN = u?.isIGGN ? `
       <div class="nav-section">I.G.G.N.</div>
       <a href="/iggn" class="nav-link">Dossiers disciplinaires</a>
   ` : '';
- 
+
   const sidebar = u ? `
   <aside class="sidebar">
     <div class="sb-brand">
@@ -360,7 +360,7 @@ function layout(title, body, u) {
     </div>
   </aside>
   ` : '';
- 
+
   return `<!DOCTYPE html>
 <html lang="fr">
 <head>
@@ -380,7 +380,7 @@ function layout(title, body, u) {
 </body>
 </html>`;
 }
- 
+
 // ═══════════════════════════════════════════════════════════════════
 //  ROUTES PUBLIQUES
 // ═══════════════════════════════════════════════════════════════════
@@ -415,7 +415,7 @@ app.get('/', (req, res) => {
 </div>
 </body></html>`);
 });
- 
+
 app.get('/acces-refuse', (req, res) => {
   res.status(403).send(layout('Accès refusé', `
     <div class="page-err">
@@ -426,12 +426,12 @@ app.get('/acces-refuse', (req, res) => {
     </div>
   `, null));
 });
- 
+
 app.get('/auth/discord', (req, res) => {
   const p = new URLSearchParams({ client_id:CFG.CLIENT_ID, redirect_uri:CFG.REDIRECT_URI, response_type:'code', scope:'identify' });
   res.redirect(`https://discord.com/api/oauth2/authorize?${p}`);
 });
- 
+
 app.get('/auth/callback', async (req, res) => {
   if (!req.query.code) return res.redirect('/?err=no_code');
   try {
@@ -448,9 +448,9 @@ app.get('/auth/callback', async (req, res) => {
     res.redirect('/tableau-de-bord');
   } catch (e) { res.redirect('/?err=oauth'); }
 });
- 
+
 app.get('/logout', (req, res) => { req.session.destroy(); res.redirect('/'); });
- 
+
 // ═══════════════════════════════════════════════════════════════════
 //  TABLEAU DE BORD
 // ═══════════════════════════════════════════════════════════════════
@@ -464,7 +464,7 @@ app.get('/tableau-de-bord', requireAuth, (req, res) => {
   };
   const recentCasiers = db.prepare(`SELECT * FROM casiers ORDER BY created_at DESC LIMIT 5`).all();
   const mandatsActifs = db.prepare(`SELECT * FROM mandats WHERE statut='actif' ORDER BY created_at DESC LIMIT 4`).all();
- 
+
   const catLabel = {
     off_sup:'Officier Supérieur', off_sub:'Officier Subalterne',
     sof_sup:'Sous-Officier Supérieur', sof_sub:'Sous-Officier Subalterne',
@@ -472,7 +472,7 @@ app.get('/tableau-de-bord', requireAuth, (req, res) => {
     parquet:'Ministère Public', magistrat:'Magistrature',
     auxiliaire:'Auxiliaire de Justice', representant:'Représentant Serveur',
   };
- 
+
   const permList = [
     u.canCasier  ? 'Création de casiers judiciaires' : null,
     u.canRapport ? 'Rédaction de rapports de patrouille' : null,
@@ -481,7 +481,7 @@ app.get('/tableau-de-bord', requireAuth, (req, res) => {
     u.isGA       ? 'Accès espace Gendarme-Adjoint' : null,
     u.isIGGN     ? 'Accès espace I.G.G.N.' : null,
   ].filter(Boolean);
- 
+
   const casierRows = recentCasiers.map(c => `
     <tr>
       <td class="mono">${c.id}</td>
@@ -491,20 +491,20 @@ app.get('/tableau-de-bord', requireAuth, (req, res) => {
       <td class="mono dim">${fmtDate(c.created_at)}</td>
       <td><a href="/casiers/${c.id}" class="link-action">Consulter</a></td>
     </tr>`).join('');
- 
+
   const mandatCards = mandatsActifs.map(m => `
     <div class="info-row">
       <span class="info-type">${m.type_mandat.toUpperCase()}</span>
       <span class="info-cible">${m.cible}</span>
       <span class="mono dim small">${fmtDate(m.created_at)}</span>
     </div>`).join('') || '<p class="empty-note">Aucun mandat en cours.</p>';
- 
+
   res.send(layout('Tableau de bord', `
     <header class="page-header">
       <h1>Tableau de bord</h1>
       <span class="page-date">${nowFR()}</span>
     </header>
- 
+
     <div class="grid-cols-2 mb-lg">
       <div class="card">
         <h3 class="card-title">Fiche de service</h3>
@@ -541,7 +541,7 @@ app.get('/tableau-de-bord', requireAuth, (req, res) => {
         </div>
       </div>
     </div>
- 
+
     <div class="card mb-lg">
       <div class="card-head">
         <h3 class="card-title">Derniers casiers enregistrés</h3>
@@ -552,14 +552,14 @@ app.get('/tableau-de-bord', requireAuth, (req, res) => {
         <tbody>${casierRows || '<tr><td colspan="6" class="empty-note">Aucun casier.</td></tr>'}</tbody>
       </table>
     </div>
- 
+
     <div class="card">
       <h3 class="card-title">Mandats actifs</h3>
       ${mandatCards}
     </div>
   `, u));
 });
- 
+
 // ═══════════════════════════════════════════════════════════════════
 //  CASIERS
 // ═══════════════════════════════════════════════════════════════════
@@ -567,7 +567,7 @@ app.get('/casiers', requireAuth, (req, res) => {
   const u = req.session.user;
   const q = req.query.q || '';
   const rows = q ? Q.searchCasier.all(`%${q}%`) : Q.listCasiers.all();
- 
+
   const tbody = rows.map(c => `
     <tr>
       <td class="mono">${c.id}</td>
@@ -578,7 +578,7 @@ app.get('/casiers', requireAuth, (req, res) => {
       <td class="mono dim small">${fmtDate(c.created_at)}</td>
       <td><a href="/casiers/${c.id}" class="link-action">Consulter</a></td>
     </tr>`).join('');
- 
+
   res.send(layout('Casiers judiciaires', `
     <header class="page-header">
       <h1>Casiers judiciaires <span class="page-count">${rows.length}</span></h1>
@@ -599,7 +599,7 @@ app.get('/casiers', requireAuth, (req, res) => {
     </div>
   `, u));
 });
- 
+
 app.get('/casiers/nouveau', requireAuth, guardPerm('canCasier'), (req, res) => {
   res.send(layout('Nouveau casier', `
     <header class="page-header"><h1>Nouveau casier judiciaire — B3</h1></header>
@@ -657,19 +657,19 @@ app.get('/casiers/nouveau', requireAuth, guardPerm('canCasier'), (req, res) => {
     </script>
   `, req.session.user));
 });
- 
+
 app.post('/casiers', requireAuth, guardPerm('canCasier'), (req, res) => {
   const {nom_prenom,age_rp,faits,type_peine,amende,amende_payee,duree_gav,duree_prison,photo_url} = req.body;
   if (!nom_prenom||!age_rp||!faits||!type_peine) return res.redirect('/casiers/nouveau');
   const r = Q.insertCasier.run(nom_prenom,parseInt(age_rp),faits,type_peine,amende||null,parseInt(amende_payee)||0,duree_gav||null,duree_prison||null,photo_url||null,byStr(req.session.user));
   res.redirect(`/casiers/${r.lastInsertRowid}?ok=1`);
 });
- 
+
 app.get('/casiers/:id', requireAuth, (req, res) => {
   const c = Q.getCasier.get(parseInt(req.params.id));
   if (!c) return res.redirect('/casiers');
   const u = req.session.user;
- 
+
   let peineSection = '';
   if (c.type_peine==='amende') peineSection = `
     <dt>Type de peine</dt><dd>Amende pécuniaire</dd>
@@ -681,11 +681,11 @@ app.get('/casiers/:id', requireAuth, (req, res) => {
   else if (c.type_peine==='prison') peineSection = `
     <dt>Type de peine</dt><dd>Emprisonnement</dd>
     <dt>Durée</dt><dd>${c.duree_prison||'Non renseignée'}</dd>`;
- 
+
   const photoBlock = c.photo_url
     ? `<img src="${c.photo_url}" class="suspect-photo" alt="Photo mis en cause" onerror="this.outerHTML='<div class=photo-placeholder>Photo indisponible</div>'">`
     : `<div class="photo-placeholder">Aucune photographie</div>`;
- 
+
   res.send(layout(`Casier #${c.id}`, `
     <header class="page-header">
       <h1>Casier judiciaire <span class="mono dim">#${c.id}</span></h1>
@@ -694,7 +694,7 @@ app.get('/casiers/:id', requireAuth, (req, res) => {
         ${u.canCasier ? `<form method="POST" action="/casiers/${c.id}/supprimer" style="display:inline" onsubmit="return confirm('Supprimer définitivement ce casier ?')"><button class="btn btn--danger">Supprimer</button></form>` : ''}
       </div>
     </header>
- 
+
     <div class="casier-sheet card">
       <div class="casier-layout">
         <div class="casier-main">
@@ -722,11 +722,11 @@ app.get('/casiers/:id', requireAuth, (req, res) => {
     ${req.query.ok ? `<div class="toast" id="toast">Casier enregistré.<script>setTimeout(()=>document.getElementById('toast').remove(),3000)<\/script></div>` : ''}
   `, u));
 });
- 
+
 app.post('/casiers/:id/supprimer', requireAuth, guardPerm('canCasier'), (req, res) => {
   Q.deleteCasier.run(parseInt(req.params.id)); res.redirect('/casiers');
 });
- 
+
 // ═══════════════════════════════════════════════════════════════════
 //  FICHIERS S
 // ═══════════════════════════════════════════════════════════════════
@@ -752,14 +752,14 @@ app.get('/fichiers-s', requireAuth, (req, res) => {
       </div>
     </div>`;
   }).join('');
- 
+
   res.send(layout('Fichiers [S]', `
     <header class="page-header">
       <h1>Fichiers [S] <span class="page-count">${rows.length}</span></h1>
       <button class="btn" onclick="openModal('modal-fs')">Ouvrir un fichier</button>
     </header>
     <div class="fs-grid">${cards || '<p class="empty-note">Aucun fichier [S] actif.</p>'}</div>
- 
+
     <div class="modal" id="modal-fs" hidden>
       <div class="modal-panel">
         <div class="modal-head">
@@ -793,14 +793,14 @@ app.get('/fichiers-s', requireAuth, (req, res) => {
     </div>
   `, u));
 });
- 
+
 app.post('/fichiers-s', requireAuth, (req, res) => {
   const {nom_prenom,age_rp,motif,niveau,description,photo_url} = req.body;
   Q.insertFS.run(nom_prenom,age_rp?parseInt(age_rp):null,motif,niveau,description,photo_url||null,byStr(req.session.user));
   res.redirect('/fichiers-s');
 });
 app.post('/fichiers-s/:id/clore', requireAuth, (req, res) => { Q.closeFS.run(parseInt(req.params.id)); res.redirect('/fichiers-s'); });
- 
+
 // ═══════════════════════════════════════════════════════════════════
 //  MANDATS
 // ═══════════════════════════════════════════════════════════════════
@@ -808,7 +808,7 @@ app.get('/mandats', requireAuth, (req, res) => {
   const u       = req.session.user;
   const mandats = Q.listMandats.all();
   const TYPES = { arrestation:"Mandat d'arrestation", perquisition:"Mandat de perquisition", recherche:"Mandat de recherche", depot:"Mandat de dépôt", citation:"Citation à comparaître", saisie:"Mandat de saisie" };
- 
+
   const tbody = mandats.map(m => `
     <tr class="${m.statut==='clôturé'?'row--closed':''}">
       <td class="mono">${m.id}</td>
@@ -820,7 +820,7 @@ app.get('/mandats', requireAuth, (req, res) => {
       <td><span class="pill ${m.statut==='actif'?'pill-ok':'pill-dim'}">${m.statut}</span></td>
       <td>${m.statut==='actif'&&u.canMandat?`<form method="POST" action="/mandats/${m.id}/cloturer" style="display:inline"><button class="btn btn--sm btn--ghost">Clôturer</button></form>`:''}</td>
     </tr>`).join('');
- 
+
   const form = u.canMandat ? `
     <div class="card mt-lg">
       <h3 class="card-title">Émettre un mandat</h3>
@@ -838,7 +838,7 @@ app.get('/mandats', requireAuth, (req, res) => {
         <div class="form-actions"><button type="submit" class="btn btn--primary">Émettre le mandat</button></div>
       </form>
     </div>` : `<p class="info-note mt-lg">L'émission de mandats est réservée au Ministère Public et à la Magistrature.</p>`;
- 
+
   res.send(layout('Mandats', `
     <header class="page-header"><h1>Mandats de justice <span class="page-count">${mandats.length}</span></h1></header>
     <div class="card">
@@ -850,7 +850,7 @@ app.get('/mandats', requireAuth, (req, res) => {
     ${form}
   `, u));
 });
- 
+
 app.post('/mandats', requireAuth, guardPerm('canMandat'), (req, res) => {
   const {type_mandat,cible,motif,details} = req.body;
   const u = req.session.user;
@@ -860,14 +860,14 @@ app.post('/mandats', requireAuth, guardPerm('canMandat'), (req, res) => {
 app.post('/mandats/:id/cloturer', requireAuth, guardPerm('canMandat'), (req, res) => {
   Q.cloturerMandat.run(parseInt(req.params.id)); res.redirect('/mandats');
 });
- 
+
 // ═══════════════════════════════════════════════════════════════════
 //  RAPPORTS DE PATROUILLE
 // ═══════════════════════════════════════════════════════════════════
 app.get('/rapports', requireAuth, (req, res) => {
   const u = req.session.user;
   const rapports = Q.listRapports.all();
- 
+
   const tbody = rapports.map(r => `
     <tr>
       <td class="mono">${r.id}</td>
@@ -877,7 +877,7 @@ app.get('/rapports', requireAuth, (req, res) => {
       <td class="mono dim small">${fmtDate(r.created_at)}</td>
       <td><button class="link-action" onclick="showRapport(${r.id})">Lire</button></td>
     </tr>`).join('');
- 
+
   const details = rapports.map(r => `
     <div id="rd-${r.id}" class="rapport-detail card" style="display:none">
       <div class="card-head">
@@ -894,7 +894,7 @@ app.get('/rapports', requireAuth, (req, res) => {
       <div class="rapport-text">${r.contenu}</div>
       ${r.incidents ? `<div class="section-label mt-md">Incidents notables</div><div class="rapport-text">${r.incidents}</div>` : ''}
     </div>`).join('');
- 
+
   const formBlock = u.canRapport ? `
     <div class="modal" id="modal-rapport" hidden>
       <div class="modal-panel modal-panel--lg">
@@ -917,7 +917,7 @@ app.get('/rapports', requireAuth, (req, res) => {
         </form>
       </div>
     </div>` : '';
- 
+
   res.send(layout('Rapports de patrouille', `
     <header class="page-header">
       <h1>Rapports de patrouille <span class="page-count">${rapports.length}</span></h1>
@@ -942,14 +942,14 @@ app.get('/rapports', requireAuth, (req, res) => {
     </script>
   `, u));
 });
- 
+
 app.post('/rapports', requireAuth, guardPerm('canRapport'), (req, res) => {
   const {titre,zone,contenu,incidents,agents} = req.body;
   const u = req.session.user;
   Q.insertRapport.run(titre,zone,contenu,incidents||null,agents||null,u.nick,u.grade?.sigle||'');
   res.redirect('/rapports');
 });
- 
+
 // ═══════════════════════════════════════════════════════════════════
 //  ESPACE G.A.
 // ═══════════════════════════════════════════════════════════════════
@@ -957,7 +957,7 @@ app.get('/espace-ga', requireAuth, (req, res) => {
   const u = req.session.user;
   if (!u.isGA) return res.redirect('/tableau-de-bord');
   const msgs = Q.listGA.all();
- 
+
   const list = msgs.map(m => `
     <div class="ga-item">
       <div class="ga-header">
@@ -967,7 +967,7 @@ app.get('/espace-ga', requireAuth, (req, res) => {
       </div>
       <div class="ga-body">${m.contenu}</div>
     </div>`).join('') || '<p class="empty-note">Aucun message.</p>';
- 
+
   res.send(layout('Espace G.A.', `
     <header class="page-header">
       <h1>Espace Gendarme-Adjoint</h1>
@@ -975,7 +975,7 @@ app.get('/espace-ga', requireAuth, (req, res) => {
     </header>
     <p class="info-note mb-lg">Cet espace est réservé aux Gendarmes-Adjoints (GA1 & GA2). Vos messages sont visibles par votre hiérarchie.</p>
     <div class="card">${list}</div>
- 
+
     <div class="modal" id="modal-ga" hidden>
       <div class="modal-panel">
         <div class="modal-head"><h2>Nouveau message</h2><button class="modal-close" onclick="closeModal('modal-ga')">×</button></div>
@@ -1001,14 +1001,14 @@ app.get('/espace-ga', requireAuth, (req, res) => {
     </div>
   `, u));
 });
- 
+
 app.post('/espace-ga', requireAuth, (req, res) => {
   if (!req.session.user.isGA) return res.redirect('/tableau-de-bord');
   const {type_msg,objet,contenu} = req.body;
   Q.insertGA.run(type_msg,objet,contenu,`[${req.session.user.grade?.sigle||'GA'}] ${req.session.user.nick}`);
   res.redirect('/espace-ga');
 });
- 
+
 // ═══════════════════════════════════════════════════════════════════
 //  IGGN
 // ═══════════════════════════════════════════════════════════════════
@@ -1016,9 +1016,9 @@ app.get('/iggn', requireAuth, (req, res) => {
   const u = req.session.user;
   if (!u.isIGGN) return res.redirect('/tableau-de-bord');
   const dossiers = Q.listIGGN.all();
- 
+
   const TYPES_IGGN = { faute_prof:'Faute professionnelle', manquement:'Manquement au devoir', abus_pouvoir:'Abus de pouvoir', violence:'Violence illégitime', corruption:'Corruption / Conflit d\'intérêts', autre:'Autre' };
- 
+
   const list = dossiers.map(d => `
     <div class="iggn-dossier ${d.statut==='clôturé'?'iggn--closed':''}">
       <div class="iggn-head">
@@ -1034,7 +1034,7 @@ app.get('/iggn', requireAuth, (req, res) => {
         ${d.statut==='ouvert'?`<form method="POST" action="/iggn/${d.id}/cloturer" style="display:inline"><button class="btn btn--sm btn--ghost">Clôturer le dossier</button></form>`:''}
       </div>
     </div>`).join('') || '<p class="empty-note">Aucun dossier disciplinaire.</p>';
- 
+
   res.send(layout('I.G.G.N.', `
     <header class="page-header">
       <h1>Inspection Générale de la Gendarmerie Nationale</h1>
@@ -1045,7 +1045,7 @@ app.get('/iggn', requireAuth, (req, res) => {
       Les dossiers sont strictement confidentiels et réservés au personnel habilité I.G.G.N.
     </p>
     <div class="card">${list}</div>
- 
+
     <div class="modal" id="modal-iggn" hidden>
       <div class="modal-panel modal-panel--lg">
         <div class="modal-head"><h2>Ouverture d'un dossier disciplinaire</h2><button class="modal-close" onclick="closeModal('modal-iggn')">×</button></div>
@@ -1070,7 +1070,7 @@ app.get('/iggn', requireAuth, (req, res) => {
     </div>
   `, u));
 });
- 
+
 app.post('/iggn', requireAuth, (req, res) => {
   if (!req.session.user.isIGGN) return res.redirect('/tableau-de-bord');
   const {type_saisine,cible,grade_cible,faits,details} = req.body;
@@ -1081,14 +1081,14 @@ app.post('/iggn/:id/cloturer', requireAuth, (req, res) => {
   if (!req.session.user.isIGGN) return res.redirect('/tableau-de-bord');
   Q.cloturerIGGN.run(parseInt(req.params.id)); res.redirect('/iggn');
 });
- 
+
 // ═══════════════════════════════════════════════════════════════════
 //  ORDRES DE SERVICE
 // ═══════════════════════════════════════════════════════════════════
 app.get('/ordres-service', requireAuth, (req, res) => {
   const u      = req.session.user;
   const ordres = Q.listOrdres.all();
- 
+
   const cards = ordres.map(o => {
     const pm = prioMeta(o.priorite);
     return `<div class="ordre-item ordre-${pm.cls}">
@@ -1100,7 +1100,7 @@ app.get('/ordres-service', requireAuth, (req, res) => {
       </div>
     </div>`;
   }).join('') || '<p class="empty-note">Aucun ordre de service.</p>';
- 
+
   const form = u.canOrdres ? `
     <div class="modal" id="modal-ordre" hidden>
       <div class="modal-panel">
@@ -1125,7 +1125,7 @@ app.get('/ordres-service', requireAuth, (req, res) => {
         </form>
       </div>
     </div>` : '';
- 
+
   res.send(layout('Ordres de service', `
     <header class="page-header">
       <h1>Ordres de service <span class="page-count">${ordres.length}</span></h1>
@@ -1136,14 +1136,14 @@ app.get('/ordres-service', requireAuth, (req, res) => {
     ${form}
   `, u));
 });
- 
+
 app.post('/ordres-service', requireAuth, guardPerm('canOrdres'), (req, res) => {
   const {titre,contenu,priorite} = req.body;
   const u = req.session.user;
   Q.insertOrdre.run(titre,contenu,priorite,u.nick,u.grade?.sigle||'');
   res.redirect('/ordres-service');
 });
- 
+
 // ═══════════════════════════════════════════════════════════════════
 //  START
 // ═══════════════════════════════════════════════════════════════════
