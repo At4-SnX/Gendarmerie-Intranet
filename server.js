@@ -1,14 +1,14 @@
 'use strict';
- 
+
 const express  = require('express');
 const session  = require('express-session');
 const fetch    = require('node-fetch');
 const Database = require('better-sqlite3');
 const path     = require('path');
- 
+
 const app  = express();
 const PORT = process.env.PORT || 3000;
- 
+
 // ─── CONFIG ──────────────────────────────────────────────────────────────────
 const CFG = {
   CLIENT_ID:      process.env.DISCORD_CLIENT_ID     || '',
@@ -18,7 +18,7 @@ const CFG = {
   GUILD_ID:       process.env.GUILD_ID              || '',
   BOT_TOKEN:      process.env.DISCORD_TOKEN         || '',
 };
- 
+
 // ─── HIÉRARCHIE DES GRADES ───────────────────────────────────────────────────
 const GRADES = {
   // Officiers supérieurs
@@ -61,18 +61,18 @@ const GRADES = {
   // Représentant
   '1512953207238955191': { sigle: 'RS',   nom: 'Représentant Serveur', rang: 'REP',    cat: 'representant' },
 };
- 
+
 const ROLE_GEND_ID = '1508283902672896055'; // Rôle Gendarmerie Nationale
- 
+
 // Catégories ayant accès autorisé
 const CATS_AUTORISES = ['off_sup','off_sub','sof_sup','sof_sub','rang','reserve','parquet','magistrat','auxiliaire','representant'];
- 
+
 // Catégories pouvant émettre des mandats
 const CATS_PARQUET = ['parquet','magistrat'];
- 
+
 // Catégories espace GA
 const ROLES_GA = ['1508161154692677803','1508161155263365212'];
- 
+
 function getGradeFromRoles(roles) {
   // On retourne le grade le plus élevé (premier trouvé dans la liste ordonnée)
   const ordre = Object.keys(GRADES);
@@ -81,14 +81,14 @@ function getGradeFromRoles(roles) {
   }
   return null;
 }
- 
+
 function isParquet(roles) {
   return roles.some(r => GRADES[r]?.cat && CATS_PARQUET.includes(GRADES[r].cat));
 }
 function isOfficier(roles) {
   return roles.some(r => ['off_sup','off_sub'].includes(GRADES[r]?.cat));
 }
- 
+
 // ─── BASE DE DONNÉES ─────────────────────────────────────────────────────────
 const db = new Database('./gend_intranet.db');
 db.pragma('journal_mode = WAL');
@@ -107,7 +107,7 @@ db.exec(`
     created_by   TEXT,
     created_at   TEXT DEFAULT (datetime('now'))
   );
- 
+
   CREATE TABLE IF NOT EXISTS fichiers_s (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     nom_prenom  TEXT NOT NULL,
@@ -120,7 +120,7 @@ db.exec(`
     actif       INTEGER DEFAULT 1,
     created_at  TEXT DEFAULT (datetime('now'))
   );
- 
+
   CREATE TABLE IF NOT EXISTS mandats (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     type_mandat TEXT NOT NULL,
@@ -132,7 +132,7 @@ db.exec(`
     statut      TEXT NOT NULL DEFAULT 'actif',
     created_at  TEXT DEFAULT (datetime('now'))
   );
- 
+
   CREATE TABLE IF NOT EXISTS rapports_patrouille (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     titre       TEXT NOT NULL,
@@ -144,7 +144,7 @@ db.exec(`
     grade_by    TEXT,
     created_at  TEXT DEFAULT (datetime('now'))
   );
- 
+
   CREATE TABLE IF NOT EXISTS espace_ga (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     type_msg    TEXT NOT NULL DEFAULT 'message',
@@ -153,7 +153,7 @@ db.exec(`
     created_by  TEXT,
     created_at  TEXT DEFAULT (datetime('now'))
   );
- 
+
   CREATE TABLE IF NOT EXISTS ordres_service (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     titre       TEXT NOT NULL,
@@ -164,7 +164,7 @@ db.exec(`
     created_at  TEXT DEFAULT (datetime('now'))
   );
 `);
- 
+
 const Q = {
   // Casiers
   listCasiers:   db.prepare(`SELECT * FROM casiers ORDER BY created_at DESC LIMIT 50`),
@@ -172,32 +172,32 @@ const Q = {
   searchCasier:  db.prepare(`SELECT * FROM casiers WHERE nom_prenom LIKE ? ORDER BY created_at DESC`),
   insertCasier:  db.prepare(`INSERT INTO casiers (nom_prenom,age_rp,faits,type_peine,amende,amende_payee,duree_gav,duree_prison,photo_url,created_by) VALUES (?,?,?,?,?,?,?,?,?,?)`),
   deleteCasier:  db.prepare(`DELETE FROM casiers WHERE id=?`),
- 
+
   // Fichiers S
   listFichiersS:  db.prepare(`SELECT * FROM fichiers_s WHERE actif=1 ORDER BY niveau ASC, created_at DESC`),
   insertFichierS: db.prepare(`INSERT INTO fichiers_s (nom_prenom,age_rp,motif,niveau,description,photo_url,created_by) VALUES (?,?,?,?,?,?,?)`),
   closeFichierS:  db.prepare(`UPDATE fichiers_s SET actif=0 WHERE id=?`),
- 
+
   // Mandats
   listMandats:   db.prepare(`SELECT * FROM mandats ORDER BY created_at DESC LIMIT 50`),
   getMandatsActifs: db.prepare(`SELECT * FROM mandats WHERE statut='actif' ORDER BY created_at DESC`),
   insertMandat:  db.prepare(`INSERT INTO mandats (type_mandat,cible,motif,details,emis_par,grade_emis) VALUES (?,?,?,?,?,?)`),
   cloturerMandat: db.prepare(`UPDATE mandats SET statut='clôturé' WHERE id=?`),
- 
+
   // Rapports
   listRapports:  db.prepare(`SELECT * FROM rapports_patrouille ORDER BY created_at DESC LIMIT 30`),
   getMyRapports: db.prepare(`SELECT * FROM rapports_patrouille WHERE created_by=? ORDER BY created_at DESC`),
   insertRapport: db.prepare(`INSERT INTO rapports_patrouille (titre,zone,contenu,incidents,agents,created_by,grade_by) VALUES (?,?,?,?,?,?,?)`),
- 
+
   // Espace GA
   listGA:        db.prepare(`SELECT * FROM espace_ga ORDER BY created_at DESC LIMIT 40`),
   insertGA:      db.prepare(`INSERT INTO espace_ga (type_msg,objet,contenu,created_by) VALUES (?,?,?,?)`),
- 
+
   // Ordres de service
   listOrdres:    db.prepare(`SELECT * FROM ordres_service ORDER BY created_at DESC LIMIT 20`),
   insertOrdre:   db.prepare(`INSERT INTO ordres_service (titre,contenu,priorite,created_by,grade_by) VALUES (?,?,?,?,?)`),
 };
- 
+
 // ─── MIDDLEWARE ───────────────────────────────────────────────────────────────
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -209,7 +209,7 @@ app.use(session({
   cookie: { maxAge: 1000 * 60 * 60 * 8 },
 }));
 app.use((req, res, next) => { res.locals.user = req.session.user || null; next(); });
- 
+
 // ─── GUARD ───────────────────────────────────────────────────────────────────
 async function requireAuth(req, res, next) {
   if (!req.session.user) return res.redirect('/');
@@ -235,7 +235,7 @@ async function requireAuth(req, res, next) {
     res.redirect('/?err=check');
   }
 }
- 
+
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
 function nowFR() {
   return new Date().toLocaleString('fr-FR', { timeZone: 'Europe/Paris', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -270,14 +270,14 @@ function mandatLabel(t) {
   };
   return m[t] || t.toUpperCase();
 }
- 
+
 // ─── LAYOUT ──────────────────────────────────────────────────────────────────
 function layout(title, body, user) {
   const grade = user?.grade;
   const gradeStr = grade ? `${grade.sigle} — ${grade.nom}` : 'Personnel autorisé';
   const nick  = user?.nick || user?.username || '';
   const avatar = user ? `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png?size=64` : '';
- 
+
   const nav = user ? `
   <nav class="sidebar">
     <div class="sb-header">
@@ -309,7 +309,7 @@ function layout(title, body, user) {
   </nav>
   <div class="main-wrap">
   ` : '<div class="main-wrap full">';
- 
+
   return `<!DOCTYPE html>
 <html lang="fr">
 <head>
@@ -319,6 +319,7 @@ function layout(title, body, user) {
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=IM+Fell+English:ital@0;1&family=Special+Elite&family=Courier+Prime:wght@400;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/css/style.css">
+  <script src="/js/app.js" defer></script>
 </head>
 <body>
 ${nav}
@@ -329,7 +330,7 @@ ${nav}
 </body>
 </html>`;
 }
- 
+
 // ─── PAGE D'ACCUEIL / LOGIN ───────────────────────────────────────────────────
 app.get('/', (req, res) => {
   if (req.session.user) return res.redirect('/tableau-de-bord');
@@ -339,6 +340,7 @@ app.get('/', (req, res) => {
 <title>Accès — Intranet GN-RP</title>
 <link href="https://fonts.googleapis.com/css2?family=IM+Fell+English:ital@0;1&family=Special+Elite&family=Courier+Prime:wght@400;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/css/style.css">
+  <script src="/js/app.js" defer></script>
 </head><body class="login-body">
 <div class="login-outer">
   <div class="login-box">
@@ -376,7 +378,7 @@ app.get('/', (req, res) => {
 </div>
 </body></html>`);
 });
- 
+
 app.get('/acces-refuse', (req, res) => {
   res.status(403).send(layout('Accès refusé', `
     <div class="doc-box error-doc">
@@ -389,13 +391,13 @@ app.get('/acces-refuse', (req, res) => {
     </div>
   `, null));
 });
- 
+
 // ─── OAUTH2 ───────────────────────────────────────────────────────────────────
 app.get('/auth/discord', (req, res) => {
   const p = new URLSearchParams({ client_id: CFG.CLIENT_ID, redirect_uri: CFG.REDIRECT_URI, response_type: 'code', scope: 'identify' });
   res.redirect(`https://discord.com/api/oauth2/authorize?${p}`);
 });
- 
+
 app.get('/auth/callback', async (req, res) => {
   const { code } = req.query;
   if (!code) return res.redirect('/?err=no_code');
@@ -413,9 +415,9 @@ app.get('/auth/callback', async (req, res) => {
     res.redirect('/tableau-de-bord');
   } catch (e) { res.redirect('/?err=oauth'); }
 });
- 
+
 app.get('/logout', (req, res) => { req.session.destroy(); res.redirect('/'); });
- 
+
 // ─── TABLEAU DE BORD ──────────────────────────────────────────────────────────
 app.get('/tableau-de-bord', requireAuth, (req, res) => {
   const u = req.session.user;
@@ -427,14 +429,14 @@ app.get('/tableau-de-bord', requireAuth, (req, res) => {
   };
   const recentCasiers = db.prepare(`SELECT * FROM casiers ORDER BY created_at DESC LIMIT 5`).all();
   const recentMandats = db.prepare(`SELECT * FROM mandats WHERE statut='actif' ORDER BY created_at DESC LIMIT 3`).all();
- 
+
   const gradeBlock = u.grade ? `
     <div class="dossier-field"><span class="field-label">Matricule</span><span class="field-val">${u.id}</span></div>
     <div class="dossier-field"><span class="field-label">Grade</span><span class="field-val">[${u.grade.rang}] ${u.grade.sigle} — ${u.grade.nom}</span></div>
     <div class="dossier-field"><span class="field-label">Pseudo serveur</span><span class="field-val">${u.nick}</span></div>
     <div class="dossier-field"><span class="field-label">Accès parquet</span><span class="field-val">${u.isParquet ? 'OUI — HABILITÉ' : 'NON'}</span></div>
   ` : '<p>Grade non identifié</p>';
- 
+
   const casierRows = recentCasiers.map(c => `
     <tr>
       <td class="mono">#${c.id}</td>
@@ -445,7 +447,7 @@ app.get('/tableau-de-bord', requireAuth, (req, res) => {
       <td><a href="/casiers/${c.id}" class="tbl-link">VOIR ▸</a></td>
     </tr>
   `).join('');
- 
+
   const mandatRows = recentMandats.map(m => `
     <div class="mandat-item">
       <span class="mandat-type">${mandatLabel(m.type_mandat)}</span>
@@ -453,12 +455,12 @@ app.get('/tableau-de-bord', requireAuth, (req, res) => {
       <span class="mandat-date mono small">${fmtDate(m.created_at)}</span>
     </div>
   `).join('');
- 
+
   res.send(layout('Tableau de bord', `
     <div class="page-title">
       ══ TABLEAU DE BORD ══════════════════════════════════════════
     </div>
- 
+
     <div class="grid-2">
       <div class="doc-box">
         <div class="doc-title">§ FICHE DE SERVICE</div>
@@ -474,7 +476,7 @@ app.get('/tableau-de-bord', requireAuth, (req, res) => {
         <div class="stat-row"><span class="stat-num">${stats.rapports}</span><span class="stat-lbl">Rapports de patrouille</span></div>
       </div>
     </div>
- 
+
     <div class="doc-box mt">
       <div class="doc-title">§ DERNIERS CASIERS ENREGISTRÉS</div>
       <div class="doc-sep">──────────────────────────────────────────────────────────────</div>
@@ -483,7 +485,7 @@ app.get('/tableau-de-bord', requireAuth, (req, res) => {
         <tbody>${casierRows || '<tr><td colspan="6" class="empty">— Aucun casier —</td></tr>'}</tbody>
       </table>
     </div>
- 
+
     <div class="doc-box mt">
       <div class="doc-title">§ MANDATS ACTIFS</div>
       <div class="doc-sep">──────────────────────────────────────────────────────────────</div>
@@ -491,13 +493,13 @@ app.get('/tableau-de-bord', requireAuth, (req, res) => {
     </div>
   `, u));
 });
- 
+
 // ─── CASIERS ──────────────────────────────────────────────────────────────────
 app.get('/casiers', requireAuth, (req, res) => {
   const q = req.query.q || '';
   const rows = q ? Q.searchCasier.all(`%${q}%`) : Q.listCasiers.all();
   const u = req.session.user;
- 
+
   const tableRows = rows.map(c => `
     <tr>
       <td class="mono">#${c.id}</td>
@@ -509,7 +511,7 @@ app.get('/casiers', requireAuth, (req, res) => {
       <td><a href="/casiers/${c.id}" class="tbl-link">VOIR ▸</a></td>
     </tr>
   `).join('');
- 
+
   res.send(layout('Casiers judiciaires', `
     <div class="page-title">
       ══ CASIERS JUDICIAIRES — EXTRAITS B3 ════════════════════════
@@ -533,7 +535,7 @@ app.get('/casiers', requireAuth, (req, res) => {
     </div>
   `, u));
 });
- 
+
 app.get('/casiers/nouveau', requireAuth, (req, res) => {
   res.send(layout('Nouveau casier', `
     <div class="page-title">
@@ -597,7 +599,7 @@ app.get('/casiers/nouveau', requireAuth, (req, res) => {
     </script>
   `, req.session.user));
 });
- 
+
 app.post('/casiers', requireAuth, (req, res) => {
   const { nom_prenom, age_rp, faits, type_peine, amende, amende_payee, duree_gav, duree_prison, photo_url } = req.body;
   if (!nom_prenom || !age_rp || !faits || !type_peine) return res.redirect('/casiers/nouveau?err=1');
@@ -606,12 +608,12 @@ app.post('/casiers', requireAuth, (req, res) => {
   const r = Q.insertCasier.run(nom_prenom, parseInt(age_rp), faits, type_peine, amende||null, parseInt(amende_payee)||0, duree_gav||null, duree_prison||null, photo_url||null, createdBy);
   res.redirect(`/casiers/${r.lastInsertRowid}?ok=1`);
 });
- 
+
 app.get('/casiers/:id', requireAuth, (req, res) => {
   const c = Q.getCasier.get(parseInt(req.params.id));
   if (!c) return res.redirect('/casiers');
   const u = req.session.user;
- 
+
   let peineBlock = '';
   if (c.type_peine === 'amende') peineBlock = `
     <div class="dossier-field"><span class="field-label">TYPE DE PEINE</span><span class="field-val">AMENDE</span></div>
@@ -623,11 +625,11 @@ app.get('/casiers/:id', requireAuth, (req, res) => {
   else if (c.type_peine === 'prison') peineBlock = `
     <div class="dossier-field"><span class="field-label">TYPE DE PEINE</span><span class="field-val">EMPRISONNEMENT</span></div>
     <div class="dossier-field"><span class="field-label">DURÉE</span><span class="field-val">${c.duree_prison || 'N/R'}</span></div>`;
- 
+
   const photoHtml = c.photo_url
     ? `<img src="${c.photo_url}" class="suspect-img" alt="Photo mis en cause" onerror="this.outerHTML='<div class=no-photo>— PHOTO INDISPONIBLE —</div>'">`
     : `<div class="no-photo">— AUCUNE PHOTOGRAPHIE —</div>`;
- 
+
   res.send(layout(`Casier #${c.id}`, `
     <div class="page-title">
       ══ EXTRAIT DE CASIER JUDICIAIRE — DOCUMENT B3 ═══════════════
@@ -667,17 +669,17 @@ app.get('/casiers/:id', requireAuth, (req, res) => {
     </div>
   `, u));
 });
- 
+
 app.post('/casiers/:id/supprimer', requireAuth, (req, res) => {
   Q.deleteCasier.run(parseInt(req.params.id));
   res.redirect('/casiers');
 });
- 
+
 // ─── FICHIERS S ───────────────────────────────────────────────────────────────
 app.get('/fichiers-s', requireAuth, (req, res) => {
   const rows = Q.listFichiersS.all();
   const u    = req.session.user;
- 
+
   const cards = rows.map(f => `
     <div class="fichier-s-card niveau-${f.niveau}">
       <div class="fs-niveau">${niveauLabel(f.niveau)}</div>
@@ -697,7 +699,7 @@ app.get('/fichiers-s', requireAuth, (req, res) => {
       </div>
     </div>
   `).join('');
- 
+
   res.send(layout('Fichiers [S]', `
     <div class="page-title">
       ══ FICHIERS [S] — PERSONNES SURVEILLÉES ═════════════════════
@@ -706,7 +708,7 @@ app.get('/fichiers-s', requireAuth, (req, res) => {
       <button class="btn-action" onclick="showModal('modal-fs')">⊞ NOUVEAU FICHIER [S]</button>
     </div>
     <div class="fs-grid">${cards || '<div class="empty">— Aucun fichier [S] actif —</div>'}</div>
- 
+
     <div class="modal" id="modal-fs">
       <div class="modal-box">
         <div class="doc-title">⊞ OUVERTURE D'UN FICHIER [S]</div>
@@ -739,7 +741,7 @@ app.get('/fichiers-s', requireAuth, (req, res) => {
     </div>
   `, u));
 });
- 
+
 app.post('/fichiers-s', requireAuth, (req, res) => {
   const { nom_prenom, age_rp, motif, niveau, description, photo_url } = req.body;
   const u = req.session.user;
@@ -747,17 +749,17 @@ app.post('/fichiers-s', requireAuth, (req, res) => {
   Q.insertFichierS.run(nom_prenom, age_rp ? parseInt(age_rp) : null, motif, niveau, description, photo_url || null, by);
   res.redirect('/fichiers-s');
 });
- 
+
 app.post('/fichiers-s/:id/clore', requireAuth, (req, res) => {
   Q.closeFichierS.run(parseInt(req.params.id));
   res.redirect('/fichiers-s');
 });
- 
+
 // ─── MANDATS ──────────────────────────────────────────────────────────────────
 app.get('/mandats', requireAuth, (req, res) => {
   const u       = req.session.user;
   const mandats = Q.listMandats.all();
- 
+
   const rows = mandats.map(m => `
     <tr class="${m.statut === 'clôturé' ? 'row-closed' : ''}">
       <td class="mono">#${m.id}</td>
@@ -770,7 +772,7 @@ app.get('/mandats', requireAuth, (req, res) => {
       <td>${m.statut === 'actif' && u.isParquet ? `<form method="POST" action="/mandats/${m.id}/cloturer" style="display:inline"><button class="btn-sec small" type="submit">CLÔTURER</button></form>` : ''}</td>
     </tr>
   `).join('');
- 
+
   const formHtml = u.isParquet ? `
     <div class="doc-box mt">
       <div class="doc-title">⊞ ÉMETTRE UN MANDAT</div>
@@ -798,7 +800,7 @@ app.get('/mandats', requireAuth, (req, res) => {
       </form>
     </div>
   ` : `<div class="alert-info">§ L'émission de mandats est réservée au Ministère Public et à la Magistrature.</div>`;
- 
+
   res.send(layout('Mandats', `
     <div class="page-title">
       ══ MANDATS DE JUSTICE ════════════════════════════════════════
@@ -814,7 +816,7 @@ app.get('/mandats', requireAuth, (req, res) => {
     ${formHtml}
   `, u));
 });
- 
+
 app.post('/mandats', requireAuth, (req, res) => {
   if (!req.session.user.isParquet) return res.redirect('/mandats');
   const { type_mandat, cible, motif, details } = req.body;
@@ -823,18 +825,18 @@ app.post('/mandats', requireAuth, (req, res) => {
   Q.insertMandat.run(type_mandat, cible, motif, details || null, by, u.grade?.nom || '');
   res.redirect('/mandats');
 });
- 
+
 app.post('/mandats/:id/cloturer', requireAuth, (req, res) => {
   if (!req.session.user.isParquet) return res.redirect('/mandats');
   Q.cloturerMandat.run(parseInt(req.params.id));
   res.redirect('/mandats');
 });
- 
+
 // ─── RAPPORTS DE PATROUILLE ───────────────────────────────────────────────────
 app.get('/rapports', requireAuth, (req, res) => {
   const u = req.session.user;
   const rapports = Q.listRapports.all();
- 
+
   const rows = rapports.map(r => `
     <tr>
       <td class="mono">#${r.id}</td>
@@ -845,7 +847,7 @@ app.get('/rapports', requireAuth, (req, res) => {
       <td><button class="tbl-link" onclick="showRapport(${r.id})">LIRE ▸</button></td>
     </tr>
   `).join('');
- 
+
   const rapportDetails = rapports.map(r => `
     <div class="rapport-detail" id="rd-${r.id}" style="display:none">
       <div class="doc-title">RAPPORT DE PATROUILLE — N°${r.id}</div>
@@ -865,7 +867,7 @@ app.get('/rapports', requireAuth, (req, res) => {
       <button class="btn-sec" onclick="hideRapport(${r.id})">✕ FERMER</button>
     </div>
   `).join('');
- 
+
   res.send(layout('Rapports de patrouille', `
     <div class="page-title">
       ══ RAPPORTS DE PATROUILLE ════════════════════════════════════
@@ -881,9 +883,9 @@ app.get('/rapports', requireAuth, (req, res) => {
         <tbody>${rows || '<tr><td colspan="6" class="empty">— Aucun rapport —</td></tr>'}</tbody>
       </table>
     </div>
- 
+
     <div id="rapports-details">${rapportDetails}</div>
- 
+
     <div class="modal" id="modal-rapport">
       <div class="modal-box wide">
         <div class="doc-title">⊞ RÉDACTION D'UN RAPPORT DE PATROUILLE</div>
@@ -903,14 +905,14 @@ app.get('/rapports', requireAuth, (req, res) => {
         </form>
       </div>
     </div>
- 
+
     <script>
       function showRapport(id){document.querySelectorAll('.rapport-detail').forEach(e=>e.style.display='none');document.getElementById('rd-'+id).style.display='block';document.getElementById('rd-'+id).scrollIntoView({behavior:'smooth'});}
       function hideRapport(id){document.getElementById('rd-'+id).style.display='none';}
     </script>
   `, u));
 });
- 
+
 app.post('/rapports', requireAuth, (req, res) => {
   const { titre, zone, contenu, incidents, agents } = req.body;
   const u  = req.session.user;
@@ -919,13 +921,13 @@ app.post('/rapports', requireAuth, (req, res) => {
   Q.insertRapport.run(titre, zone, contenu, incidents || null, agents || null, by, grade);
   res.redirect('/rapports');
 });
- 
+
 // ─── ESPACE G.A. ──────────────────────────────────────────────────────────────
 app.get('/espace-ga', requireAuth, (req, res) => {
   const u = req.session.user;
   if (!u.isGA) return res.redirect('/tableau-de-bord');
   const messages = Q.listGA.all();
- 
+
   const rows = messages.map(m => `
     <div class="ga-msg">
       <div class="ga-msg-header">
@@ -936,7 +938,7 @@ app.get('/espace-ga', requireAuth, (req, res) => {
       <div class="ga-contenu">${m.contenu}</div>
     </div>
   `).join('');
- 
+
   res.send(layout('Espace G.A.', `
     <div class="page-title">
       ══ ESPACE GENDARME-ADJOINT (G.A.) ═══════════════════════════
@@ -980,7 +982,7 @@ app.get('/espace-ga', requireAuth, (req, res) => {
     </div>
   `, u));
 });
- 
+
 app.post('/espace-ga', requireAuth, (req, res) => {
   if (!req.session.user.isGA) return res.redirect('/tableau-de-bord');
   const { type_msg, objet, contenu } = req.body;
@@ -989,12 +991,12 @@ app.post('/espace-ga', requireAuth, (req, res) => {
   Q.insertGA.run(type_msg, objet, contenu, by);
   res.redirect('/espace-ga');
 });
- 
+
 // ─── ORDRES DE SERVICE ────────────────────────────────────────────────────────
 app.get('/ordres-service', requireAuth, (req, res) => {
   const u      = req.session.user;
   const ordres = Q.listOrdres.all();
- 
+
   const cards = ordres.map(o => `
     <div class="ordre-card prio-${o.priorite}">
       <div class="ordre-strip">${prioriteLabel(o.priorite)}</div>
@@ -1005,7 +1007,7 @@ app.get('/ordres-service', requireAuth, (req, res) => {
       </div>
     </div>
   `).join('');
- 
+
   const formHtml = u.isOfficier ? `
     <div class="doc-box mt">
       <div class="doc-title">⊞ ÉMETTRE UN ORDRE DE SERVICE</div>
@@ -1028,7 +1030,7 @@ app.get('/ordres-service', requireAuth, (req, res) => {
       </form>
     </div>
   ` : `<div class="alert-info">§ La publication d'ordres de service est réservée aux Officiers.</div>`;
- 
+
   res.send(layout('Ordres de service', `
     <div class="page-title">
       ══ ORDRES DE SERVICE ════════════════════════════════════════
@@ -1037,7 +1039,7 @@ app.get('/ordres-service', requireAuth, (req, res) => {
     ${formHtml}
   `, u));
 });
- 
+
 app.post('/ordres-service', requireAuth, (req, res) => {
   if (!req.session.user.isOfficier) return res.redirect('/ordres-service');
   const { titre, contenu, priorite } = req.body;
@@ -1047,7 +1049,6 @@ app.post('/ordres-service', requireAuth, (req, res) => {
   Q.insertOrdre.run(titre, contenu, priorite, by, grade);
   res.redirect('/ordres-service');
 });
- 
+
 // ─── START ────────────────────────────────────────────────────────────────────
 app.listen(PORT, () => console.log(`✅ Serveur lancé sur le port ${PORT}`));
- 
